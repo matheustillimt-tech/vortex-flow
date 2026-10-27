@@ -1,0 +1,24 @@
+# dependências e build
+node_modules/
+.next/
+out/
+build/
+dist/
+.turbo
+*.tsbuildinfo
+next-env.d.ts
+
+# variáveis de ambiente (nunca versionar chaves)
+.env
+.env.*
+!.env.example
+
+# Vercel e Supabase (arquivos locais da CLI)
+.vercel
+supabase/.temp/
+supabase/.branches/
+
+# testes e sistema
+coverage/
+*.log
+.DS_Store

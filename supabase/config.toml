@@ -1,0 +1,4 @@
+# Configuração mínima da CLI do Supabase para este projeto.
+# O banco de verdade fica na nuvem: ligue com `supabase link --project-ref SEU-PROJECT-REF`
+# e aplique as migrações com `supabase db push` (veja INSTALACAO.md).
+project_id = "vortex-flow"
