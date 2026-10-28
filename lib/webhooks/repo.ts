@@ -1,26 +1,13 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { decryptSecret } from "@/lib/crypto";
 import type { TaskPriority } from "@/lib/types";
-import type { EntregaReservada, WebhookRepo } from "@/lib/webhooks/dispatch";
+import { eventoDa, type EntregaReservada, type WebhookRepo } from "@/lib/webhooks/dispatch";
+import { lerConfigAvisos } from "@/lib/webhooks/config-db";
 
 /** Implementação real do WebhookRepo. Recebe o cliente service role. */
 export function criarRepoSupabase(admin: SupabaseClient): WebhookRepo {
   return {
     async lerConfig() {
-      const { data } = await admin
-        .from("webhook_config")
-        .select("url, token, ativo")
-        .eq("id", true)
-        .maybeSingle();
-      if (!data) return null;
-      let token: string | null = null;
-      try {
-        token = decryptSecret(data.token as string | null);
-      } catch (err) {
-        console.error("[webhook] não foi possível descriptografar o token:", err);
-        token = null;
-      }
-      return { url: (data.url as string | null) ?? null, token, ativo: !!data.ativo };
+      return lerConfigAvisos(admin);
     },
 
     async reservarPendentes(limite) {
@@ -33,7 +20,7 @@ export function criarRepoSupabase(admin: SupabaseClient): WebhookRepo {
       const [tarefa, pessoa, dados, quem] = await Promise.all([
         admin
           .from("tasks")
-          .select("id, titulo, descricao, prioridade, prazo, prazo_has_time, projects(id, nome)")
+          .select("id, titulo, descricao, status, prioridade, prazo, prazo_has_time, projects(id, nome)")
           .eq("id", e.task_id)
           .maybeSingle(),
         admin.from("users").select("id, nome").eq("id", e.user_id).maybeSingle(),
@@ -52,6 +39,7 @@ export function criarRepoSupabase(admin: SupabaseClient): WebhookRepo {
         id: string;
         titulo: string;
         descricao: string | null;
+        status: string;
         prioridade: TaskPriority;
         prazo: string | null;
         prazo_has_time: boolean | null;
@@ -60,9 +48,15 @@ export function criarRepoSupabase(admin: SupabaseClient): WebhookRepo {
       const p = pessoa.data as { id: string; nome: string } | null;
       if (!t || !p) return null;
 
+      const evento = eventoDa(e);
+      if ((evento === "tarefa.prazo" || evento === "tarefa.atrasada") && t.status === "concluido") {
+        return "cancelada";
+      }
+
       const whatsapp = (dados.data as { whatsapp: string | null } | null)?.whatsapp ?? null;
       if (!whatsapp) return "sem_telefone";
 
+      const extra = (e.payload_extra ?? {}) as Record<string, unknown>;
       const projeto = Array.isArray(t.projects) ? (t.projects[0] ?? null) : t.projects;
       return {
         responsavel: { id: p.id, nome: p.nome, whatsapp },
@@ -75,7 +69,9 @@ export function criarRepoSupabase(admin: SupabaseClient): WebhookRepo {
           prazoTemHora: t.prazo_has_time === true
         },
         projeto,
-        atribuidoPorNome: (quem.data as { nome: string } | null)?.nome ?? null
+        atribuidoPorNome: (quem.data as { nome: string } | null)?.nome ?? null,
+        comentario: typeof extra.comentario === "string" ? extra.comentario : null,
+        diasAtraso: typeof extra.dias_atraso === "number" ? extra.dias_atraso : null
       };
     },
 

@@ -97,7 +97,7 @@ export function validateChavePix(
 export function validateWhatsapp(value: string): string | null {
   const d = onlyDigits(value);
   if (!d) return "Informe seu WhatsApp.";
-  if (d.length !== 10 && d.length !== 11) return "WhatsApp inválido — use DDD + número.";
+  if (d.length !== 10 && d.length !== 11) return "WhatsApp inválido: use DDD + número.";
   // DDDs brasileiros vão de 11 a 99 e nunca terminam em 0.
   if (d[0] === "0" || d[1] === "0") return "DDD inválido.";
   if (d.length === 11 && d[2] !== "9") return "Celular deve começar com 9 depois do DDD.";

@@ -2,6 +2,8 @@ import { z } from "zod";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { can, visibleProjectIds, type McpUser } from "@/lib/mcp/auth";
 import { APP_NAME } from "@/lib/brand";
+import { registrarAtividadeClaude } from "@/lib/mcp/atividade";
+import { parseDataHora } from "@/lib/mcp/datas";
 
 /**
  * Ferramentas do conector MCP do sistema (o nome vem de lib/brand.ts).
@@ -101,6 +103,77 @@ async function resolverProjeto(
     projetos.find((p) => p.nome.toLowerCase().includes(t)) ??
     null
   );
+}
+
+type TarefaAchada = {
+  id: string;
+  titulo: string;
+  status: string;
+  project_id: string;
+  created_by: string | null;
+  prazo: string | null;
+};
+
+/**
+ * Acha UMA tarefa pelo título, só entre projetos que a pessoa enxerga.
+ * Devolve a mensagem de erro pronta quando não acha ou acha várias.
+ */
+async function acharTarefa(
+  userId: string,
+  titulo: string,
+  projeto?: string
+): Promise<{ tarefa: TarefaAchada } | { erro: string }> {
+  const supabase = createAdminClient();
+  let alvoProjetos = await visibleProjectIds(userId);
+  if (alvoProjetos.length === 0) return { erro: "Nenhum projeto acessível." };
+  if (projeto) {
+    const p = await resolverProjeto(userId, projeto);
+    if (!p) return { erro: `Projeto "${projeto}" não encontrado.` };
+    alvoProjetos = [p.id];
+  }
+  let q = supabase
+    .from("tasks")
+    .select("id, titulo, status, project_id, created_by, prazo")
+    .in("project_id", alvoProjetos)
+    .ilike("titulo", `%${titulo.trim().replace(/[%_*\\]/g, "\\$&")}%`)
+    .limit(5);
+  // Sem "Todas as tarefas: ver", só as tarefas em que a pessoa é responsável
+  // ou que ela criou (mesmo alcance de Minhas Tarefas).
+  if (!(await can(userId, "tarefas", "view"))) {
+    const { data: asg } = await supabase.from("task_assignees").select("task_id").eq("user_id", userId);
+    const minhas = ((asg as Array<{ task_id: string }>) ?? []).map((a) => a.task_id);
+    q = minhas.length
+      ? q.or(`created_by.eq.${userId},id.in.(${minhas.join(",")})`)
+      : q.or(`created_by.eq.${userId}`);
+  }
+  const { data } = await q;
+  const achadas = (data as TarefaAchada[]) ?? [];
+  if (achadas.length === 0) return { erro: `Nenhuma tarefa encontrada com "${titulo}".` };
+  if (achadas.length > 1) {
+    const exata = achadas.filter((t) => t.titulo.trim().toLowerCase() === titulo.trim().toLowerCase());
+    if (exata.length === 1) return { tarefa: exata[0] };
+    return {
+      erro: `Encontrei ${achadas.length} tarefas parecidas:\n${achadas
+        .map((t) => `- ${t.titulo}`)
+        .join("\n")}\nSeja mais específico (ou informe o projeto).`
+    };
+  }
+  return { tarefa: achadas[0] };
+}
+
+/** "30/10/2026 às 14:00" no horário de Brasília. */
+function dataHoraBr(iso: string): string {
+  const p = new Intl.DateTimeFormat("pt-BR", {
+    timeZone: "America/Sao_Paulo",
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false
+  }).formatToParts(new Date(iso));
+  const g = (t: string) => p.find((x) => x.type === t)?.value ?? "";
+  return `${g("day")}/${g("month")}/${g("year")} às ${g("hour")}:${g("minute")}`;
 }
 
 const PRIORIDADES = ["baixa", "media", "alta", "urgente"] as const;
@@ -222,6 +295,9 @@ export function buildTools(user: McpUser) {
           });
         }
 
+        await registrarAtividadeClaude(user, "criar_projeto", `criou o projeto "${criado.nome}"`, {
+          projeto_id: criado.id
+        });
         return ok(
           `Projeto criado: "${criado.nome}" (${args.tipo ?? "infoproduto"}), com o quadro padrão. Já dá pra criar tarefas nele.`
         );
@@ -344,6 +420,9 @@ export function buildTools(user: McpUser) {
           );
         }
 
+        await registrarAtividadeClaude(user, "criar_tarefa", `criou a tarefa "${criada.titulo}"`, {
+          tarefa_id: criada.id
+        });
         const partes = [`Tarefa criada: "${criada.titulo}" em ${projeto.nome}.`];
         if (prazoIso)
           partes.push(
@@ -636,6 +715,10 @@ export function buildTools(user: McpUser) {
             msgResp += ` Não encontrei: ${naoEncontrados.join(", ")}.`;
         }
 
+        await registrarAtividadeClaude(user, "atualizar_tarefa", `atualizou a tarefa "${tarefa.titulo}"`, {
+          tarefa_id: tarefa.id,
+          campos: [...Object.keys(patch), ...(args.responsaveis ? ["responsaveis"] : [])]
+        });
         return ok(`Tarefa "${tarefa.titulo}" atualizada.${msgProjeto}${msgResp}`);
       }
     },
@@ -722,7 +805,261 @@ export function buildTools(user: McpUser) {
         if (error) return ok(`Erro ao excluir: ${error.message}`);
         if (count === 0)
           return ok(`A tarefa "${tarefa.titulo}" não foi encontrada para excluir.`);
+        await registrarAtividadeClaude(user, "excluir_tarefa", `excluiu a tarefa "${tarefa.titulo}"`, {
+          tarefa_id: tarefa.id
+        });
         return ok(`Tarefa "${tarefa.titulo}" excluída de ${nomeProjeto}.`);
+      }
+    },
+
+    {
+      name: "comentar_tarefa",
+      config: {
+        title: "Comentar tarefa",
+        description:
+          "Escreve um comentário numa tarefa, em nome do usuário. Os responsáveis (e quem for marcado com @Nome no texto) recebem aviso no WhatsApp, se os avisos estiverem ligados.",
+        inputSchema: z.object({
+          titulo: z.string().describe("Título (ou parte dele) da tarefa"),
+          projeto: z.string().optional().describe("Projeto, para desambiguar títulos parecidos"),
+          texto: z.string().min(1).max(4000).describe("O comentário. Use @Nome Completo para marcar alguém.")
+        })
+      },
+      handler: async (args: { titulo: string; projeto?: string; texto: string }): Promise<Texto> => {
+        // Comentar é conversa, não edição: basta enxergar a tarefa (migration 044).
+        if (!(await can(user.id, "tarefas", "view")) && !(await can(user.id, "minhas-tarefas", "view")))
+          return negado("ver tarefas");
+        const achada = await acharTarefa(user.id, args.titulo, args.projeto);
+        if ("erro" in achada) return ok(achada.erro);
+        const { tarefa } = achada;
+
+        const { error } = await createAdminClient()
+          .from("task_comments")
+          .insert({ task_id: tarefa.id, user_id: user.id, conteudo: args.texto.trim() });
+        if (error) return ok(`Erro ao comentar: ${error.message}`);
+
+        await registrarAtividadeClaude(user, "comentar_tarefa", `comentou na tarefa "${tarefa.titulo}"`, {
+          tarefa_id: tarefa.id
+        });
+        return ok(`Comentário publicado na tarefa "${tarefa.titulo}".`);
+      }
+    },
+
+    {
+      name: "gerenciar_checklist",
+      config: {
+        title: "Checklist da tarefa",
+        description:
+          "Mostra, adiciona itens e marca ou desmarca itens como feitos no checklist de uma tarefa. Sem adicionar/marcar/desmarcar, só lista.",
+        inputSchema: z.object({
+          titulo: z.string().describe("Título (ou parte dele) da tarefa"),
+          projeto: z.string().optional().describe("Projeto, para desambiguar"),
+          adicionar: z.array(z.string().min(1)).optional().describe("Itens novos"),
+          marcar_feito: z.array(z.string()).optional().describe("Itens (ou parte do texto) para marcar como feitos"),
+          desmarcar: z.array(z.string()).optional().describe("Itens (ou parte do texto) para voltar a pendente")
+        })
+      },
+      handler: async (args: {
+        titulo: string;
+        projeto?: string;
+        adicionar?: string[];
+        marcar_feito?: string[];
+        desmarcar?: string[];
+      }): Promise<Texto> => {
+        const alterando =
+          (args.adicionar?.length ?? 0) + (args.marcar_feito?.length ?? 0) + (args.desmarcar?.length ?? 0) > 0;
+        // Checklist faz parte da tarefa: mudar exige Editar (mesma trava da RLS, migration 044).
+        if (alterando) {
+          if (!(await can(user.id, "tarefas", "edit"))) return negado("editar o checklist das tarefas");
+        } else if (!(await can(user.id, "tarefas", "view")) && !(await can(user.id, "minhas-tarefas", "view"))) {
+          return negado("ver tarefas");
+        }
+        const achada = await acharTarefa(user.id, args.titulo, args.projeto);
+        if ("erro" in achada) return ok(achada.erro);
+        const { tarefa } = achada;
+        const supabase = createAdminClient();
+
+        const carregar = async () => {
+          const { data } = await supabase
+            .from("task_checklist_items")
+            .select("id, titulo, done, ordem")
+            .eq("task_id", tarefa.id)
+            .order("ordem");
+          return (data as Array<{ id: string; titulo: string; done: boolean; ordem: number }>) ?? [];
+        };
+        let itens = await carregar();
+        const avisos: string[] = [];
+
+        if (args.adicionar?.length) {
+          const base = itens.reduce((m, i) => Math.max(m, i.ordem), -1) + 1;
+          const { error } = await supabase.from("task_checklist_items").insert(
+            args.adicionar.map((t, i) => ({ task_id: tarefa.id, titulo: t.trim(), ordem: base + i, done: false }))
+          );
+          if (error) return ok(`Erro ao adicionar itens: ${error.message}`);
+        }
+
+        const marcar = async (termos: string[] | undefined, done: boolean) => {
+          for (const termo of termos ?? []) {
+            const t = termo.trim().toLowerCase();
+            const alvo =
+              itens.find((i) => i.titulo.toLowerCase() === t) ??
+              itens.find((i) => i.titulo.toLowerCase().includes(t));
+            if (!alvo) {
+              avisos.push(`Não achei o item "${termo}".`);
+              continue;
+            }
+            const { error } = await supabase.from("task_checklist_items").update({ done }).eq("id", alvo.id);
+            if (error) avisos.push(`Não consegui atualizar "${alvo.titulo}": ${error.message}`);
+          }
+        };
+        await marcar(args.marcar_feito, true);
+        await marcar(args.desmarcar, false);
+
+        if (alterando) {
+          await registrarAtividadeClaude(user, "gerenciar_checklist", `mexeu no checklist de "${tarefa.titulo}"`, {
+            tarefa_id: tarefa.id,
+            adicionados: args.adicionar?.length ?? 0,
+            marcados: args.marcar_feito?.length ?? 0,
+            desmarcados: args.desmarcar?.length ?? 0
+          });
+          itens = await carregar();
+        }
+        const linhas = itens.map((i) => `- [${i.done ? "x" : " "}] ${i.titulo}`);
+        return ok(
+          [
+            `Checklist de "${tarefa.titulo}" (${itens.filter((i) => i.done).length}/${itens.length} feitos):`,
+            linhas.length ? linhas.join("\n") : "(vazio)",
+            ...avisos
+          ].join("\n")
+        );
+      }
+    },
+
+    {
+      name: "listar_atrasadas",
+      config: {
+        title: "Listar tarefas atrasadas",
+        description:
+          "Lista as tarefas atrasadas (prazo vencido e não concluídas): as suas, as de uma pessoa ou as da equipe toda, conforme a permissão de quem pede.",
+        inputSchema: z.object({
+          pessoa: z
+            .string()
+            .optional()
+            .describe("'eu' (padrão), o nome/e-mail de alguém, ou 'equipe' para todo mundo")
+        })
+      },
+      handler: async (args: { pessoa?: string }): Promise<Texto> => {
+        const termo = (args.pessoa ?? "eu").trim().toLowerCase();
+        const proprias = termo === "eu" || termo === "mim" || termo === "minhas";
+        const verTodas = await can(user.id, "tarefas", "view");
+        if (proprias) {
+          if (!verTodas && !(await can(user.id, "minhas-tarefas", "view"))) return negado("ver tarefas");
+        } else if (!verTodas) {
+          return negado("ver tarefas de outras pessoas");
+        }
+
+        const supabase = createAdminClient();
+        const permitidos = await visibleProjectIds(user.id);
+        if (permitidos.length === 0) return ok("Nenhum projeto acessível.");
+
+        let ids: string[] | null = null;
+        if (termo !== "equipe" && termo !== "todos" && termo !== "time") {
+          let alvoId: string | null = proprias ? user.id : null;
+          if (!alvoId) {
+            const { ids: achados } = await resolverResponsaveis([args.pessoa ?? ""]);
+            alvoId = achados[0] ?? null;
+          }
+          if (!alvoId) return ok(`Não encontrei o colaborador "${args.pessoa}".`);
+          const { data: asg } = await supabase.from("task_assignees").select("task_id").eq("user_id", alvoId);
+          ids = ((asg as Array<{ task_id: string }>) ?? []).map((a) => a.task_id);
+          if (ids.length === 0) return ok("Nenhuma tarefa atrasada.");
+        }
+
+        let q = supabase
+          .from("tasks")
+          .select("id, titulo, prazo, prioridade, project_id")
+          .in("project_id", permitidos)
+          .lt("prazo", new Date().toISOString())
+          .neq("status", "concluido")
+          .order("prazo", { ascending: true })
+          .limit(50);
+        if (ids) q = q.in("id", ids);
+        const { data, error } = await q;
+        if (error) return ok(`Erro ao buscar tarefas: ${error.message}`);
+        const tarefas =
+          (data as Array<{ id: string; titulo: string; prazo: string; prioridade: string; project_id: string }>) ?? [];
+        if (tarefas.length === 0) return ok("Nenhuma tarefa atrasada.");
+
+        const [{ data: projs }, { data: asgs }, { data: users }] = await Promise.all([
+          supabase.from("projects").select("id, nome").in("id", permitidos),
+          supabase.from("task_assignees").select("task_id, user_id").in("task_id", tarefas.map((t) => t.id)),
+          supabase.from("users").select("id, nome")
+        ]);
+        const nomeProjeto = new Map(((projs as Array<{ id: string; nome: string }>) ?? []).map((p) => [p.id, p.nome]));
+        const nomeUser = new Map(((users as Array<{ id: string; nome: string }>) ?? []).map((u) => [u.id, u.nome]));
+        const resp = new Map<string, string[]>();
+        for (const a of (asgs as Array<{ task_id: string; user_id: string }>) ?? []) {
+          resp.set(a.task_id, [...(resp.get(a.task_id) ?? []), nomeUser.get(a.user_id) ?? "?"]);
+        }
+        const hoje = Date.now();
+        const linhas = tarefas.map((t) => {
+          const dias = Math.max(1, Math.floor((hoje - new Date(t.prazo).getTime()) / 86_400_000));
+          return `- ${t.titulo} | ${nomeProjeto.get(t.project_id) ?? "?"} | prazo ${new Date(t.prazo).toLocaleDateString(
+            "pt-BR",
+            { timeZone: "America/Sao_Paulo" }
+          )} (${dias} dia(s)) | ${(resp.get(t.id) ?? ["sem responsável"]).join(", ")}`;
+        });
+        return ok(`${tarefas.length} tarefa(s) atrasada(s):\n${linhas.join("\n")}`);
+      }
+    },
+
+    {
+      name: "adicionar_lembrete",
+      config: {
+        title: "Adicionar lembrete no WhatsApp",
+        description:
+          "Marca um horário extra de lembrete numa tarefa: nesse horário os responsáveis recebem aviso no WhatsApp (além do aviso das 08:00 do dia do prazo). Horário de Brasília.",
+        inputSchema: z.object({
+          titulo: z.string().describe("Título (ou parte dele) da tarefa"),
+          projeto: z.string().optional().describe("Projeto, para desambiguar"),
+          quando: z
+            .string()
+            .describe("Data e hora: 'amanhã 14:00', 'hoje 9h', '30/10 15:00', '2026-10-30 15:00' ou 'em 2 horas'")
+        })
+      },
+      handler: async (args: { titulo: string; projeto?: string; quando: string }): Promise<Texto> => {
+        const podeEditar = await can(user.id, "tarefas", "edit");
+        if (!podeEditar && !(await can(user.id, "tarefas", "view")) && !(await can(user.id, "minhas-tarefas", "view")))
+          return negado("ver tarefas");
+        const achada = await acharTarefa(user.id, args.titulo, args.projeto);
+        if ("erro" in achada) return ok(achada.erro);
+        const { tarefa } = achada;
+        // Mesma regra da RLS de task_lembretes (migration 052).
+        if (!(tarefa.created_by === user.id || podeEditar))
+          return negado("pôr lembrete nesta tarefa (só quem criou a tarefa ou quem pode editar tarefas)");
+
+        const horario = parseDataHora(args.quando);
+        if (!horario)
+          return ok(`Não entendi o horário "${args.quando}". Use 'amanhã 14:00', '30/10 15:00' ou 'em 2 horas'.`);
+        if (new Date(horario).getTime() <= Date.now())
+          return ok(`Esse horário (${dataHoraBr(horario)}) já passou. Escolha um horário no futuro.`);
+
+        const { error } = await createAdminClient()
+          .from("task_lembretes")
+          .insert({ task_id: tarefa.id, horario, criado_por: user.id });
+        if (error)
+          return ok(
+            error.message.includes("duplicate")
+              ? `Já existe um lembrete em ${dataHoraBr(horario)} nesta tarefa.`
+              : `Erro ao criar o lembrete: ${error.message}`
+          );
+
+        await registrarAtividadeClaude(user, "adicionar_lembrete", `pôs lembrete na tarefa "${tarefa.titulo}"`, {
+          tarefa_id: tarefa.id,
+          horario
+        });
+        return ok(
+          `Lembrete marcado: ${dataHoraBr(horario)} (Brasília) na tarefa "${tarefa.titulo}". Os responsáveis recebem no WhatsApp, se os avisos de prazo estiverem ligados.`
+        );
       }
     }
   ];

@@ -1,5 +1,9 @@
 import { montarPayload, type DadosEntrega } from "@/lib/webhooks/payload";
-import { enviarWebhook, type FetchLike } from "@/lib/webhooks/send";
+import type { FetchLike } from "@/lib/webhooks/send";
+import { canalPronto, enviarPeloCanal, normalizarConfig, type ConfigCanais } from "@/lib/webhooks/canais";
+
+export { normalizarConfig };
+import { ehEventoAviso, type EventoAviso } from "@/lib/avisos/template";
 
 /**
  * Envia o lote de entregas pendentes. O acesso ao banco fica atrás de
@@ -10,7 +14,7 @@ export const MAX_TENTATIVAS = 3;
 /** 5 × 10 s de timeout cabe no maxDuration = 60 da rota. */
 export const LOTE = 5;
 
-export type StatusEntrega = "pendente" | "processando" | "enviado" | "erro" | "sem_telefone";
+export type StatusEntrega = "pendente" | "processando" | "enviado" | "erro" | "sem_telefone" | "cancelado";
 
 export interface EntregaReservada {
   id: string;
@@ -19,12 +23,21 @@ export interface EntregaReservada {
   atribuido_por: string | null;
   /** Já inclui a tentativa atual (a reserva incrementa). */
   tentativas: number;
+  /** Ausente nas linhas antigas: vale tarefa.atribuida. */
+  evento?: EventoAviso | string | null;
+  payload_extra?: Record<string, unknown> | null;
 }
 
-export interface WebhookConfigLida {
+/** Segredos já descriptografados. Campos ausentes = canal webhook (formato de 051). */
+export type WebhookConfigLida = Partial<ConfigCanais> & {
   url: string | null;
   token: string | null;
   ativo: boolean;
+  templates?: Partial<Record<EventoAviso, string>> | null;
+};
+
+export function eventoDa(e: Pick<EntregaReservada, "evento">): EventoAviso {
+  return ehEventoAviso(e.evento) ? e.evento : "tarefa.atribuida";
 }
 
 export interface Finalizacao {
@@ -37,8 +50,11 @@ export interface Finalizacao {
 export interface WebhookRepo {
   lerConfig(): Promise<WebhookConfigLida | null>;
   reservarPendentes(limite: number): Promise<EntregaReservada[]>;
-  /** null: tarefa ou pessoa não existe mais; "sem_telefone": número apagado. */
-  carregarDados(e: EntregaReservada): Promise<DadosEntrega | "sem_telefone" | null>;
+  /**
+   * null: tarefa ou pessoa não existe mais; "sem_telefone": número apagado;
+   * "cancelada": prazo/atraso de tarefa que já foi concluída.
+   */
+  carregarDados(e: EntregaReservada): Promise<DadosEntrega | "sem_telefone" | "cancelada" | null>;
   finalizar(id: string, f: Finalizacao): Promise<void>;
 }
 
@@ -53,11 +69,13 @@ export async function despacharPendentes(
 ): Promise<{ processadas: number }> {
   const agora = opts.agora ?? (() => new Date());
   const cfg = await repo.lerConfig();
-  if (!cfg || !cfg.ativo || !cfg.url) return { processadas: 0 };
+  if (!cfg || !cfg.ativo) return { processadas: 0 };
+  const canal = normalizarConfig(cfg);
+  if (!canalPronto(canal)) return { processadas: 0 };
 
   const lote = await repo.reservarPendentes(LOTE);
   for (const entrega of lote) {
-    /** true assim que o POST voltou 2xx — a partir daí nunca mais regredimos o status. */
+    /** true assim que o envio deu certo — a partir daí nunca mais regredimos o status. */
     let postOk = false;
     try {
       const dados = await repo.carregarDados(entrega);
@@ -66,6 +84,15 @@ export async function despacharPendentes(
           status: "erro",
           http_status: null,
           erro: "Tarefa ou responsável não encontrado.",
+          enviado_em: null
+        });
+        continue;
+      }
+      if (dados === "cancelada") {
+        await repo.finalizar(entrega.id, {
+          status: "cancelado",
+          http_status: null,
+          erro: "A tarefa foi concluída antes do envio.",
           enviado_em: null
         });
         continue;
@@ -81,16 +108,19 @@ export async function despacharPendentes(
       }
 
       const quando = agora();
-      const r = await enviarWebhook({
-        url: cfg.url,
-        token: cfg.token,
-        payload: montarPayload("tarefa.atribuida", dados, {
-          agora: quando,
-          appUrl: opts.appUrl,
-          entregaId: entrega.id
-        }),
-        fetchImpl: opts.fetchImpl
+      const payload = montarPayload(eventoDa(entrega), dados, {
+        agora: quando,
+        appUrl: opts.appUrl,
+        entregaId: entrega.id,
+        templates: cfg.templates
       });
+      const r = await enviarPeloCanal(
+        canal,
+        { telefone: dados.responsavel.whatsapp },
+        payload.mensagem,
+        payload,
+        { fetchImpl: opts.fetchImpl }
+      );
       postOk = r.ok;
       await repo.finalizar(
         entrega.id,
@@ -105,7 +135,7 @@ export async function despacharPendentes(
       );
     } catch (err) {
       if (postOk) {
-        // O POST já chegou na ferramenta; só a gravação do resultado falhou.
+        // A mensagem já saiu; só a gravação do resultado falhou.
         // Nunca regredir para pendente/erro aqui — isso reenviaria uma mensagem já entregue.
         console.error("[webhook] POST enviado, mas falhou ao gravar o resultado:", err);
         continue;

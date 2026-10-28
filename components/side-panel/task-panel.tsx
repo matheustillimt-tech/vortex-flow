@@ -18,7 +18,8 @@ import {
   Star,
   Plus,
   GitBranch,
-  Package
+  Package,
+  Bell
 } from "lucide-react";
 import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
@@ -51,6 +52,7 @@ import {
 } from "@/lib/types";
 import { PriorityBadge, StatusBadge } from "@/components/ui/badge";
 import { TaskAttachments } from "@/components/side-panel/task-attachments";
+import { TaskReminders } from "@/components/side-panel/task-reminders";
 import { useCan } from "@/components/permissions/permissions-provider";
 
 interface Props {
@@ -1083,6 +1085,19 @@ export function TaskPanel({ taskId, onClose, onUpdated, onDeleted }: Props) {
 
             </fieldset>
 
+            {/* Lembretes no WhatsApp: quem criou a tarefa também pode pôr horários extras. */}
+            <Section icon={Bell} title="Lembretes no WhatsApp">
+              <TaskReminders
+                taskId={task.id}
+                userId={meUserId}
+                temPrazo={!!task.prazo}
+                lembretePadrao={task.lembrete_padrao !== false}
+                podeEditarTarefa={canEdit}
+                podeAdicionar={canEdit || (!!meUserId && task.created_by === meUserId)}
+                onChangePadrao={(v) => void updateField("lembrete_padrao", v)}
+              />
+            </Section>
+
             {/* Comentários — conversa, não edição: liberado a quem vê a tarefa. */}
             <Section icon={MessageSquare} title="Comentários">
               <div className="space-y-2">
@@ -1108,7 +1123,7 @@ export function TaskPanel({ taskId, onClose, onUpdated, onDeleted }: Props) {
                   <textarea
                     value={newComment}
                     onChange={(e) => setNewComment(e.target.value)}
-                    placeholder="Adicionar comentário..."
+                    placeholder="Adicionar comentário... (use @Nome para avisar alguém)"
                     rows={2}
                     className="flex-1 px-2.5 py-1.5 bg-bg border border-border rounded-md text-sm focus:border-brand focus:outline-none resize-y"
                   />

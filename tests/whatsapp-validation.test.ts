@@ -17,7 +17,7 @@ describe("validateWhatsapp", () => {
   });
 
   it.each(["9999-8888", "(11) 9999", CELULAR + "7"])("tamanho errado: %s", (v) => {
-    expect(validateWhatsapp(v)).toBe("WhatsApp inválido — use DDD + número.");
+    expect(validateWhatsapp(v)).toBe("WhatsApp inválido: use DDD + número.");
   });
 
   it.each([celularComDdd("01"), celularComDdd("10"), "(20) 3333-4444"])("DDD inválido: %s", (v) => {

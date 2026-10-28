@@ -1,7 +1,7 @@
 # Vórtex Flow
 
 Sistema para organizar a operação da sua empresa: projetos, tarefas em quadro, cofre com as senhas
-das ferramentas da equipe, chat interno e aviso no WhatsApp quando alguém recebe uma tarefa.
+das ferramentas da equipe, chat interno e avisos no WhatsApp (tarefa nova, prazo, atraso e comentário).
 
 > **Cada instalação é de uma empresa só.** Você cria um projeto no Supabase e um na Vercel para a
 > sua empresa. Para atender outra empresa, faça outra instalação, com outro banco.
@@ -22,28 +22,39 @@ das ferramentas da equipe, chat interno e aviso no WhatsApp quando alguém receb
   WhatsApp e foto).
 - **Setores**, **Time** e **Perfis de permissão**: você decide, menu por menu, o que cada perfil pode
   ver, criar, editar e apagar.
-- **Aviso no WhatsApp**: quando alguém vira responsável por uma tarefa, o sistema manda um
-  **webhook** (um aviso automático pela internet, em formato JSON) para a ferramenta de disparo de
-  WhatsApp que você já usa.
+- **Avisos no WhatsApp**: a equipe recebe mensagem em 4 momentos, cada um você liga ou desliga:
+  **tarefa nova** (na hora), **prazo chegando** (às 08:00 do dia do prazo e nos horários extras que
+  você marcar dentro da tarefa), **tarefa atrasada** (todo dia às 08:00 até concluir) e **novo
+  comentário** (para os responsáveis e para quem foi marcado com @Nome). O texto de cada aviso é
+  editável, com campos como `{nome}`, `{tarefa}` e `{prazo}`, e a tela mostra uma prévia.
+  Você escolhe por onde a mensagem sai:
+  - **Vórtex CRM**: pelo WhatsApp conectado no seu Vórtex CRM (o CRM aberto do Grupo Vórtex);
+  - **Z-API**: direto por uma instância sua da Z-API (serviço pago de WhatsApp por API);
+  - **Webhook**: o sistema entrega os dados e o texto pronto para outra ferramenta mandar.
+  Cada pessoa cadastra o próprio número no card **Seu WhatsApp para avisos**.
 - **Notificações** dentro do sistema e **e-mails** (convite, código para trocar a senha, tarefa nova).
 - **Segurança**: senha temporária no convite, troca obrigatória no primeiro acesso e **verificação em
   duas etapas (2FA)** obrigatória, com app autenticador (Google Authenticator, Authy etc.).
 - **Conector do Claude**: cada pessoa gera um endereço pessoal e conversa com o Claude para criar,
-  listar e atualizar tarefas ("cria a tarefa X no projeto Y para sexta").
+  listar e atualizar tarefas ("cria a tarefa X no projeto Y para sexta"), comentar numa tarefa
+  marcando alguém, montar o checklist, ver as tarefas atrasadas da equipe e marcar um lembrete no
+  WhatsApp ("me lembra da tarefa X amanhã às 14:00"). Tudo que o Claude faz aparece no Registro de
+  atividades como "Ação pelo Claude", em nome da pessoa.
 
 ## Como funciona (em poucas palavras)
 
 O sistema é um site. As telas e as regras ficam na **Vercel** (o serviço que deixa o site no ar).
 Os dados, o login e os arquivos ficam no **Supabase** (banco de dados na nuvem). O próprio banco
 garante quem pode ver o quê, pelas permissões de cada perfil. Quando uma tarefa ganha um
-responsável, o banco chama o sistema, que envia o aviso para a sua ferramenta de WhatsApp e guarda
-o histórico de cada envio.
+responsável ou um comentário, o banco coloca o aviso numa fila e chama o sistema, que manda a
+mensagem pelo canal escolhido e guarda o histórico de cada envio. A cada 5 minutos o próprio banco
+confere prazos e atrasos e põe os lembretes na fila.
 
 ## Com o que é feito
 
 - **Next.js 14** (React) + TypeScript + Tailwind CSS
 - **Supabase**: Postgres, login (Auth) com 2FA, Storage (arquivos), Realtime (atualização ao vivo),
-  `pg_net` e Vault (para o webhook)
+  `pg_net`, `pg_cron` e Vault (para os avisos no WhatsApp)
 - **Resend** para e-mail (opcional)
 - **MCP** (Model Context Protocol) para o Conector do Claude
 - Testes com **Vitest** (inclusive testes do banco com PGlite)
@@ -56,7 +67,7 @@ o histórico de cada envio.
 | **Supabase** | Banco de dados, login e arquivos | Tem plano grátis (o projeto pausa após 1 semana sem uso; o plano pago evita isso) |
 | **Vercel** | Deixar o sistema no ar | Plano grátis (Hobby) para testar; para uso comercial a Vercel pede o plano Pro |
 | **Resend** (opcional) | Mandar e-mails | Tem plano grátis |
-| Ferramenta de WhatsApp (opcional) | Receber o webhook e mandar a mensagem | Depende da ferramenta (qualquer uma que receba webhook serve) |
+| Canal de WhatsApp (opcional) | Mandar os avisos: Vórtex CRM, uma instância da **Z-API** ou outra ferramenta que receba webhook | O Vórtex CRM também é código aberto, instalado por você; a Z-API cobra por instância |
 | **Claude** (opcional) | Usar o Conector do Claude | Plano que aceite conectores personalizados |
 
 ## Instalar com o Claude Code
@@ -93,9 +104,9 @@ ETAPAS:
    e rode `npm install`.
 3. Contas, uma de cada vez, esperando eu confirmar cada uma:
    a) GitHub (para guardar a sua cópia do código);
-   b) Supabase (banco de dados e login) — crie um projeto novo, região São Paulo,
+   b) Supabase (banco de dados e login): crie um projeto novo, região São Paulo,
       e me lembre de guardar a senha do banco num lugar seguro;
-   c) Vercel (onde o sistema fica no ar) — entre com a conta do GitHub.
+   c) Vercel (onde o sistema fica no ar): entre com a conta do GitHub.
 4. Banco de dados: rode `supabase login`, depois `supabase link --project-ref <ref do meu projeto>`
    (me mostre onde achar o "project ref" na URL do painel) e `supabase db push` para criar
    todas as tabelas. Confirme que terminou sem erro.
@@ -113,9 +124,12 @@ ETAPAS:
    Users → Add user (com "Auto Confirm User") e depois rode no SQL Editor o comando de
    promoção do INSTALACAO.md com o meu e-mail. Recomende desligar o cadastro aberto
    (Authentication → Sign In / Providers → "Allow new users to sign up").
-10. Integrações opcionais (pergunte quais eu quero): e-mail pelo Resend; aviso no WhatsApp
-    por webhook (extensão pg_net, segredos no Vault, WEBHOOK_DISPATCH_SECRET na Vercel e a
-    tela Configurações → Webhooks); Conector do Claude.
+10. Integrações opcionais (pergunte quais eu quero): e-mail pelo Resend; avisos no WhatsApp
+    (siga a seção "Avisos no WhatsApp" do INSTALACAO.md: ligar as extensões pg_net e pg_cron,
+    guardar webhook_app_url e webhook_dispatch_secret no Vault, cadastrar WEBHOOK_DISPATCH_SECRET
+    na Vercel e publicar de novo; depois me guie em Configurações → Avisos no WhatsApp para
+    escolher o canal entre Vórtex CRM, Z-API ou webhook, salvar e clicar em Mandar teste);
+    Conector do Claude.
 11. Rode comigo o checklist de teste do INSTALACAO.md e me entregue um resumo final:
     endereço do sistema, o que ficou ligado, o que ficou para depois e onde estão as chaves.
 ```

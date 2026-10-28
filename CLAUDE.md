@@ -7,7 +7,7 @@ negócio, não programadora.
 
 Sistema de gestão de uma empresa: projetos com quadro de tarefas (Kanban), tarefas com checklist,
 anexos e prazos, cofre de senhas das ferramentas (criptografadas), chat interno, cadastro de
-colaboradores, perfis de permissão, notificações, e-mail (Resend), aviso no WhatsApp por webhook e
+colaboradores, perfis de permissão, notificações, e-mail (Resend), avisos no WhatsApp (Vórtex CRM, Z-API ou webhook) e
 conector MCP para o Claude. **Uma instalação = uma empresa** (um projeto Supabase + um projeto Vercel).
 
 Stack: Next.js 14 (App Router) + TypeScript + Tailwind, Supabase (Postgres, Auth com 2FA, Storage,
@@ -25,7 +25,8 @@ Realtime, pg_net, Vault), Vitest + PGlite nos testes.
 | `lib/app-url.ts` | Endereço público usado em e-mails e no webhook |
 | `lib/email.ts` | Envio e modelos de e-mail |
 | `lib/crypto.ts` | Criptografia das senhas das ferramentas e do token do webhook (`TOOLS_ENC_KEY`) |
-| `lib/webhooks/` | Montagem, envio e fila do aviso no WhatsApp |
+| `lib/webhooks/` | Montagem, envio e fila dos avisos no WhatsApp; `canais/` tem os 3 canais (Vórtex CRM, Z-API, webhook) |
+| `lib/avisos/template.ts` | Eventos dos avisos, textos padrão e os campos `{nome}`, `{tarefa}`... |
 | `lib/mcp/` | Ferramentas e autenticação do Conector do Claude |
 | `lib/supabase/` | Clientes do Supabase (navegador, servidor, admin) e o middleware de login/2FA |
 | `supabase/migrations/` | Banco inteiro, em ordem (`000_schema_base.sql` → `051_...`) |

@@ -14,7 +14,8 @@ export type ActivityAction =
   | "tool_updated"
   | "tool_deleted"
   | "tool_users_changed"
-  | "webhook_updated";
+  | "webhook_updated"
+  | "claude_conector";
 
 interface LogInput {
   user_id: string | null;

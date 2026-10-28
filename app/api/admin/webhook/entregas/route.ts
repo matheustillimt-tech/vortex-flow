@@ -12,7 +12,7 @@ export async function GET() {
   const { data, error } = await createAdminClient()
     .from("webhook_entregas")
     .select(
-      "id, status, tentativas, http_status, erro, criado_em, enviado_em, task_id, tasks(titulo), users!webhook_entregas_user_id_fkey(nome)"
+      "id, evento, status, tentativas, http_status, erro, criado_em, enviado_em, task_id, tasks(titulo), users!webhook_entregas_user_id_fkey(nome)"
     )
     .order("criado_em", { ascending: false })
     .limit(50);
@@ -24,6 +24,7 @@ export async function GET() {
     const r = row as Record<string, unknown>;
     return {
       id: r.id,
+      evento: r.evento ?? "tarefa.atribuida",
       status: r.status,
       tentativas: r.tentativas,
       http_status: r.http_status,

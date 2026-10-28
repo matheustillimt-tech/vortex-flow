@@ -37,7 +37,7 @@ it("número inválido mostra o erro e não salva", async () => {
   render(<WhatsappBanner userId="u1" show />);
   fireEvent.change(screen.getByPlaceholderText("(00) 00000-0000"), { target: { value: "1199" } });
   fireEvent.click(screen.getByRole("button", { name: "Salvar" }));
-  expect(await screen.findByText("WhatsApp inválido — use DDD + número.")).toBeTruthy();
+  expect(await screen.findByText("WhatsApp inválido: use DDD + número.")).toBeTruthy();
   expect(mocks.upsert).not.toHaveBeenCalled();
 });
 

@@ -9,6 +9,7 @@ import {
   Globe2,
   KeyRound,
   MapPin,
+  Plug,
   RefreshCw,
   Search,
   ShieldX,
@@ -68,9 +69,14 @@ const ACTION_META: Record<
     icon: User
   },
   webhook_updated: {
-    label: "Webhook alterado",
+    label: "Avisos no WhatsApp alterados",
     color: "bg-brand-subtle text-brand",
     icon: Webhook
+  },
+  claude_conector: {
+    label: "Ação pelo Claude",
+    color: "bg-status-progress/15 text-status-progress",
+    icon: Plug
   }
 };
 
@@ -84,7 +90,8 @@ const ACTION_FILTERS: Array<{ value: ActivityAction | ""; label: string }> = [
   { value: "tool_updated", label: "Ferramenta editada" },
   { value: "tool_deleted", label: "Ferramenta excluída" },
   { value: "tool_users_changed", label: "Permissões alteradas" },
-  { value: "webhook_updated", label: "Webhook alterado" }
+  { value: "webhook_updated", label: "Avisos no WhatsApp alterados" },
+  { value: "claude_conector", label: "Ação pelo Claude" }
 ];
 
 export function ActivityLogsView({

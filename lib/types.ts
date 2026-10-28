@@ -220,7 +220,8 @@ export type ActivityAction =
   | "tool_updated"
   | "tool_deleted"
   | "tool_users_changed"
-  | "webhook_updated";
+  | "webhook_updated"
+  | "claude_conector";
 
 export interface ActivityLog {
   id: string;
@@ -286,6 +287,8 @@ export interface Task {
   prazo: string | null;
   /** Quando false, a UI mostra apenas a data (sem hora). */
   prazo_has_time: boolean;
+  /** Aviso no WhatsApp às 08:00 do dia do prazo (migration 052). */
+  lembrete_padrao?: boolean;
   data_conclusao: string | null;
   /** IDs de todos os responsáveis (1 ou mais).
    *  O primeiro é o "principal" (= responsavel_id). Vem do join com

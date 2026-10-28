@@ -38,8 +38,28 @@ describe("montarPayload", () => {
         link_projeto: "https://flow.exemplo.com/projetos/p1"
       },
       projeto: { id: "p1", nome: "Lançamento Setembro" },
-      atribuido_por: { nome: "Bruno Costa" }
+      atribuido_por: { nome: "Bruno Costa" },
+      comentario: null,
+      dias_atraso: null,
+      mensagem:
+        "Olá, Ana! Você tem uma nova tarefa no Vórtex Flow.\n\n*Criar criativos*\nProjeto: Lançamento Setembro\n" +
+        "Prazo: 25/09/2026 às 18:00\nPrioridade: Alta\nQuem passou: Bruno Costa\n\n" +
+        "Abrir: https://flow.exemplo.com/minha-area?task=t1"
     });
+  });
+
+  it("mensagem usa o template salvo e os dados do evento", () => {
+    const p = montarPayload(
+      "tarefa.comentario",
+      { ...base, comentario: "Pode revisar?", atribuidoPorNome: "Bia" },
+      { ...opts, templates: { "tarefa.comentario": "{quem_criou} comentou em {tarefa}: {comentario}" } }
+    );
+    expect(p.comentario).toBe("Pode revisar?");
+    expect(p.mensagem).toBe("Bia comentou em Criar criativos: Pode revisar?");
+  });
+
+  it("evento de teste leva a mensagem fixa de teste", () => {
+    expect(montarPayload("teste", base, opts).mensagem).toContain("Teste do Vórtex Flow");
   });
 
   it("prazo sem hora mostra só a data, no dia de São Paulo", () => {

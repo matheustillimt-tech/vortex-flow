@@ -32,9 +32,9 @@ ETAPAS:
    e rode `npm install`.
 3. Contas, uma de cada vez, esperando eu confirmar cada uma:
    a) GitHub (para guardar a sua cópia do código);
-   b) Supabase (banco de dados e login) — crie um projeto novo, região São Paulo,
+   b) Supabase (banco de dados e login): crie um projeto novo, região São Paulo,
       e me lembre de guardar a senha do banco num lugar seguro;
-   c) Vercel (onde o sistema fica no ar) — entre com a conta do GitHub.
+   c) Vercel (onde o sistema fica no ar): entre com a conta do GitHub.
 4. Banco de dados: rode `supabase login`, depois `supabase link --project-ref <ref do meu projeto>`
    (me mostre onde achar o "project ref" na URL do painel) e `supabase db push` para criar
    todas as tabelas. Confirme que terminou sem erro.
@@ -52,9 +52,12 @@ ETAPAS:
    Users → Add user (com "Auto Confirm User") e depois rode no SQL Editor o comando de
    promoção do INSTALACAO.md com o meu e-mail. Recomende desligar o cadastro aberto
    (Authentication → Sign In / Providers → "Allow new users to sign up").
-10. Integrações opcionais (pergunte quais eu quero): e-mail pelo Resend; aviso no WhatsApp
-    por webhook (extensão pg_net, segredos no Vault, WEBHOOK_DISPATCH_SECRET na Vercel e a
-    tela Configurações → Webhooks); Conector do Claude.
+10. Integrações opcionais (pergunte quais eu quero): e-mail pelo Resend; avisos no WhatsApp
+    (siga a seção "Avisos no WhatsApp" do INSTALACAO.md: ligar as extensões pg_net e pg_cron,
+    guardar webhook_app_url e webhook_dispatch_secret no Vault, cadastrar WEBHOOK_DISPATCH_SECRET
+    na Vercel e publicar de novo; depois me guie em Configurações → Avisos no WhatsApp para
+    escolher o canal entre Vórtex CRM, Z-API ou webhook, salvar e clicar em Mandar teste);
+    Conector do Claude.
 11. Rode comigo o checklist de teste do INSTALACAO.md e me entregue um resumo final:
     endereço do sistema, o que ficou ligado, o que ficou para depois e onde estão as chaves.
 ```

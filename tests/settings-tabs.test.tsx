@@ -36,7 +36,7 @@ it("acesso total vê as seis abas e abre em Perfil", () => {
     "Time & Permissões",
     "Perfis de Permissão",
     "Registro de atividades",
-    "Webhooks"
+    "Avisos no WhatsApp"
   ]) {
     expect(aba(nome), nome).not.toBeNull();
   }
@@ -53,7 +53,7 @@ it("Webhooks é só do acesso total, mesmo com todas as concessões de Configura
     "configuracoes.atividades:view"
   ]);
   expect(aba("Registro de atividades")).not.toBeNull();
-  expect(aba("Webhooks")).toBeNull();
+  expect(aba("Avisos no WhatsApp")).toBeNull();
 });
 
 it("perfil com só Setores vê só Setores, e ela já abre selecionada", () => {

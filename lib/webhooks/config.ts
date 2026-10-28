@@ -17,3 +17,13 @@ export function validarUrlWebhook(url: string): string | null {
   }
   return "A URL precisa começar com https://.";
 }
+
+/** null quando é https:// válido; senão a mensagem de erro. */
+export function validarHttps(url: string): string | null {
+  try {
+    if (new URL(url.trim()).protocol === "https:") return null;
+  } catch {
+    // cai na mensagem abaixo
+  }
+  return "O endereço precisa começar com https://.";
+}

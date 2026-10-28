@@ -49,3 +49,51 @@ describe("ferramentas do conector MCP", () => {
     expect(trechoDa("criar_projeto")).toContain('from("maps").insert');
   });
 });
+
+describe("ferramentas novas do conector", () => {
+  it.each([
+    ["comentar_tarefa", 'can(user.id, "tarefas", "view")'],
+    ["gerenciar_checklist", 'can(user.id, "tarefas", "edit")'],
+    ["listar_atrasadas", 'can(user.id, "tarefas", "view")'],
+    ["listar_atrasadas", 'can(user.id, "minhas-tarefas", "view")'],
+    ["adicionar_lembrete", 'can(user.id, "tarefas", "edit")'],
+    ["adicionar_lembrete", "created_by === user.id"]
+  ])("%s passa pelo perfil (%s)", (ferramenta, exigido) => {
+    expect(trechoDa(ferramenta)).toContain(exigido);
+  });
+
+  it.each(["comentar_tarefa", "gerenciar_checklist", "listar_atrasadas", "adicionar_lembrete"])(
+    "%s só procura tarefas em projetos que a pessoa enxerga",
+    (ferramenta) => {
+      expect(trechoDa(ferramenta)).toMatch(/acharTarefa\(user\.id|visibleProjectIds\(user\.id\)/);
+    }
+  );
+
+  it("comentar_tarefa grava o comentário em nome da pessoa", () => {
+    expect(trechoDa("comentar_tarefa")).toContain("user_id: user.id");
+  });
+
+  it("adicionar_lembrete recusa horário no passado", () => {
+    expect(trechoDa("adicionar_lembrete")).toContain("já passou");
+  });
+
+  it.each([
+    "criar_projeto",
+    "criar_tarefa",
+    "atualizar_tarefa",
+    "excluir_tarefa",
+    "comentar_tarefa",
+    "gerenciar_checklist",
+    "adicionar_lembrete"
+  ])("%s registra a ação no registro de atividades como da pessoa", (ferramenta) => {
+    expect(trechoDa(ferramenta)).toContain("registrarAtividadeClaude(user,");
+  });
+});
+
+it("acharTarefa sem 'Todas as tarefas: ver' só acha tarefas da própria pessoa", () => {
+  const inicio = codigo.indexOf("async function acharTarefa");
+  const trecho = codigo.slice(inicio, codigo.indexOf("\n}\n", inicio));
+  expect(trecho).toContain('can(userId, "tarefas", "view")');
+  expect(trecho).toContain('from("task_assignees")');
+  expect(trecho).toContain("created_by.eq.");
+});

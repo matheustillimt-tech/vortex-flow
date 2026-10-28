@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => {
   const state = {
     config: null as null | Record<string, unknown>,
+    whatsapp: null as string | null,
     upserts: [] as Record<string, unknown>[],
     updates: [] as Record<string, unknown>[]
   };
@@ -23,7 +24,7 @@ const mocks = vi.hoisted(() => {
         return { select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: { nome: "Admin" } }) }) }) };
       }
       if (tabela === "colaborador_dados") {
-        return { select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: { whatsapp: null } }) }) }) };
+        return { select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: { whatsapp: state.whatsapp } }) }) }) };
       }
       if (tabela === "webhook_entregas") {
         return {
@@ -64,6 +65,7 @@ const put = (body: unknown) =>
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.state.config = null;
+  mocks.state.whatsapp = null;
   mocks.state.upserts = [];
   mocks.state.updates = [];
   mocks.requireFullAccess.mockResolvedValue(sessao);
@@ -146,5 +148,102 @@ describe("teste e reenvio", () => {
     const res = await REENVIAR(new Request("http://localhost/", { method: "POST" }), { params: { id: "e1" } });
     expect(res.status).toBe(200);
     expect(mocks.state.updates[0]).toEqual({ status: "pendente", tentativas: 0, erro: null, http_status: null });
+  });
+});
+
+describe("canais", () => {
+  it("PUT do Vórtex CRM guarda a chave criptografada", async () => {
+    const res = await put({
+      canal: "crm", ativo: true,
+      crm_url: "https://p.supabase.co/functions/v1/mcp", crm_chave: "chave-crm-1234"
+    });
+    expect(res.status).toBe(200);
+    expect(mocks.state.upserts[0]).toMatchObject({
+      canal: "crm", crm_url: "https://p.supabase.co/functions/v1/mcp", crm_chave: "enc:chave-crm-1234", ativo: true
+    });
+  });
+
+  it("GET mascara a chave do CRM e os tokens da Z-API", async () => {
+    mocks.state.config = {
+      canal: "crm", ativo: true, crm_url: "https://crm", crm_chave: "enc:segredo-crm-9x9x",
+      zapi_token: "enc:tok-zapi-7a7a", zapi_client_token: "enc:cli-zapi-3b3b",
+      templates: { "tarefa.prazo": "Oi {nome}" }, eventos_ativos: { "tarefa.prazo": false }
+    };
+    const body = await (await GET()).json();
+    expect(body).toMatchObject({
+      canal: "crm", crm_chave_final: "9x9x", zapi_token_final: "7a7a", zapi_client_token_final: "3b3b",
+      templates: { "tarefa.prazo": "Oi {nome}" }
+    });
+    expect(body.eventos_ativos["tarefa.prazo"]).toBe(false);
+    expect(body.eventos_ativos["tarefa.atribuida"]).toBe(true);
+    expect(JSON.stringify(body)).not.toMatch(/segredo|tok-zapi|cli-zapi/);
+  });
+
+  it("ligar o CRM sem chave (nem salva) é recusado", async () => {
+    const res = await put({ canal: "crm", ativo: true, crm_url: "https://p.supabase.co/functions/v1/mcp" });
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toBe("Informe a chave do Vórtex CRM.");
+    expect(mocks.state.upserts).toEqual([]);
+  });
+
+  it("ligar o CRM com a chave já salva é aceito", async () => {
+    mocks.state.config = { canal: "crm", crm_chave: "enc:chave-antiga-1" };
+    const res = await put({ canal: "crm", ativo: true, crm_url: "https://p.supabase.co/functions/v1/mcp" });
+    expect(res.status).toBe(200);
+    expect(mocks.state.upserts[0]).not.toHaveProperty("crm_chave");
+  });
+
+  it("ligar a Z-API sem token é recusado", async () => {
+    const res = await put({ canal: "zapi", ativo: true, zapi_instancia: "INST" });
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toBe("Informe o token da instância da Z-API.");
+  });
+
+  it("PUT sem canal mantém o canal salvo", async () => {
+    mocks.state.config = { canal: "zapi", zapi_instancia: "I", zapi_token: "enc:tok-zapi-1" };
+    await put({ ativo: true });
+    expect(mocks.state.upserts[0]).toMatchObject({ canal: "zapi" });
+  });
+
+  it("canal desconhecido é recusado", async () => {
+    expect((await put({ canal: "telegram", ativo: false })).status).toBe(400);
+  });
+
+  it("template de evento desconhecido ou grande demais é recusado", async () => {
+    expect((await put({ url: "https://x/hook", ativo: false, templates: { outro: "x" } })).status).toBe(400);
+    expect((await put({ url: "https://x/hook", ativo: false, templates: { "tarefa.prazo": "x".repeat(1001) } })).status).toBe(400);
+  });
+
+  it("eventos só aceitam ligado/desligado", async () => {
+    expect((await put({ url: "https://x/hook", ativo: false, eventos_ativos: { "tarefa.prazo": "sim" } })).status).toBe(400);
+    await put({ url: "https://x/hook", ativo: false, eventos_ativos: { "tarefa.prazo": false } });
+    expect(mocks.state.upserts[0]).toMatchObject({ eventos_ativos: { "tarefa.prazo": false } });
+  });
+
+  it("teste pela Z-API manda a mensagem de teste para o WhatsApp de quem clicou", async () => {
+    mocks.state.config = { canal: "zapi", ativo: true, zapi_instancia: "INST", zapi_token: "enc:tok-zapi-1", zapi_client_token: null };
+    mocks.state.whatsapp = "5511900008888";
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ messageId: "m" }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      const res = await TESTE(new Request("http://localhost/", { method: "POST" }));
+      const body = await res.json();
+      expect(body).toMatchObject({ ok: true, http_status: 200 });
+      const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+      expect(url).toBe("https://api.z-api.io/instances/INST/token/tok-zapi-1/send-text");
+      expect(JSON.parse(init.body as string)).toMatchObject({ phone: "5511900008888" });
+      expect(JSON.parse(init.body as string).message).toContain("Teste do Vórtex Flow");
+      expect(JSON.stringify(body)).not.toContain("tok-zapi-1");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("teste com canal incompleto pede para salvar os dados", async () => {
+    mocks.state.config = { canal: "crm", ativo: true, crm_url: "https://crm" };
+    mocks.state.whatsapp = "5511900008888";
+    const res = await TESTE(new Request("http://localhost/", { method: "POST" }));
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toBe("Salve os dados do canal antes de testar.");
   });
 });

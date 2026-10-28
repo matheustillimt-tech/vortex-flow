@@ -13,6 +13,7 @@ import {
 import { toast } from "sonner";
 import { PageHeader } from "@/components/ui/page-header";
 import { APP_NAME } from "@/lib/brand";
+import { MeuWhatsapp } from "@/components/colaboradores/meu-whatsapp";
 
 interface TokenRow {
   id: string;
@@ -98,7 +99,7 @@ export function ConectorView() {
     <>
       <PageHeader
         title="Conector do Claude"
-        subtitle={`Crie e acompanhe tarefas do ${APP_NAME} conversando com o Claude — no navegador ou no celular.`}
+        subtitle={`Crie e acompanhe tarefas do ${APP_NAME} conversando com o Claude, no navegador ou no celular.`}
       />
 
       <div className="p-6 max-w-3xl space-y-5">
@@ -108,7 +109,7 @@ export function ConectorView() {
             <div className="flex items-start gap-2 mb-3">
               <AlertTriangle className="w-4 h-4 text-priority-medium shrink-0 mt-0.5" />
               <p className="text-xs text-fg">
-                Copie a URL agora — <strong>ela não será mostrada de novo</strong>.
+                Copie a URL agora: <strong>ela não será mostrada de novo</strong>.
                 Se perder, é só gerar outra.
               </p>
             </div>
@@ -160,7 +161,7 @@ export function ConectorView() {
           <p className="text-[11px] text-fg-subtle mt-3 leading-snug">
             A URL é pessoal e funciona como uma senha: o Claude age{" "}
             <strong>como você</strong>, respeitando exatamente os projetos e as
-            permissões que você já tem. Não compartilhe com ninguém — se cada
+            permissões que você já tem. Não compartilhe com ninguém. Se cada
             pessoa gerar a sua, fica claro quem criou o quê.
           </p>
         </section>
@@ -220,6 +221,8 @@ export function ConectorView() {
           )}
         </section>
 
+        <MeuWhatsapp />
+
         {/* O que dá pra pedir */}
         <section className="bg-bg-subtle border border-border rounded-xl p-4">
           <h2 className="text-sm font-semibold text-fg mb-2">
@@ -234,6 +237,12 @@ export function ConectorView() {
             <li>• &quot;Me mostra minhas tarefas atrasadas&quot;</li>
             <li>• &quot;Muda o prazo da tarefa X para sexta&quot;</li>
             <li>• &quot;Marca a tarefa Y como concluída&quot;</li>
+            <li>
+              • &quot;Comenta na tarefa X: subi a versão 2, @Ana Souza pode revisar?&quot;
+            </li>
+            <li>• &quot;Põe no checklist da tarefa X: roteiro, gravação e edição&quot;</li>
+            <li>• &quot;Quais tarefas da equipe estão atrasadas?&quot;</li>
+            <li>• &quot;Me lembra da tarefa X amanhã às 14:00&quot;</li>
           </ul>
         </section>
       </div>

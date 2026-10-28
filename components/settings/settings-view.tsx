@@ -7,7 +7,7 @@ import {
   Settings as SettingsIcon,
   ShieldCheck,
   User,
-  Webhook
+  MessageCircle
 } from "lucide-react";
 import { PageHeader } from "@/components/ui/page-header";
 import { ProfileTab } from "@/components/settings/profile-tab";
@@ -47,8 +47,8 @@ const TABS: {
   },
   {
     id: "webhooks",
-    label: "Webhooks",
-    icon: Webhook,
+    label: "Avisos no WhatsApp",
+    icon: MessageCircle,
     resource: "configuracoes",
     fullAccessOnly: true
   }

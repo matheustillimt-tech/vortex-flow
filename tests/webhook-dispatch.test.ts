@@ -158,3 +158,83 @@ describe("despacharPendentes", () => {
     expect(fetchImpl).toHaveBeenCalledOnce();
   });
 });
+
+describe("despacharPendentes com eventos e canais", () => {
+  const crmCfg = {
+    ativo: true, canal: "crm" as const, url: null, token: null,
+    crm_url: "https://crm/functions/v1/mcp", crm_chave: "chave-crm-123",
+    zapi_instancia: null, zapi_token: null, zapi_client_token: null, zapi_base_url: null,
+    templates: { "tarefa.atrasada": "{nome}: {tarefa} atrasou {dias_atraso} dia(s)" }
+  };
+  const rpcOk = () =>
+    vi.fn<FetchLike>().mockResolvedValue(
+      new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: { content: [{ type: "text", text: "ok" }] } }))
+    );
+
+  it("canal CRM manda o texto do template salvo para o WhatsApp do responsável", async () => {
+    const { r, finalizadas } = repo({
+      lerConfig: async () => crmCfg,
+      reservarPendentes: async () => [{ ...entrega(), evento: "tarefa.atrasada", payload_extra: { dias_atraso: 2 } }],
+      carregarDados: async () => ({ ...dados, diasAtraso: 2 })
+    });
+    const fetchImpl = rpcOk();
+    await despacharPendentes(r, { appUrl: "https://flow", fetchImpl, agora });
+    const body = JSON.parse(fetchImpl.mock.calls[0][1].body as string);
+    expect(fetchImpl.mock.calls[0][0]).toBe("https://crm/functions/v1/mcp");
+    expect(body.params.arguments).toEqual({ telefone: CELULAR_E164, texto: "Ana: Criativos atrasou 2 dia(s)" });
+    expect(finalizadas[0][1].status).toBe("enviado");
+  });
+
+  it("sem template salvo usa o texto padrão do evento", async () => {
+    const { r } = repo({
+      lerConfig: async () => ({ ...crmCfg, templates: {} }),
+      reservarPendentes: async () => [{ ...entrega(), evento: "tarefa.comentario", payload_extra: null }],
+      carregarDados: async () => ({ ...dados, comentario: "Pode revisar?" })
+    });
+    const fetchImpl = rpcOk();
+    await despacharPendentes(r, { appUrl: "https://flow", fetchImpl, agora });
+    const texto = JSON.parse(fetchImpl.mock.calls[0][1].body as string).params.arguments.texto as string;
+    expect(texto).toContain("Pode revisar?");
+    expect(texto).toContain("https://flow/minha-area?task=t1");
+    expect(texto).not.toMatch(/\{[a-z_]+\}/);
+  });
+
+  it("isError do CRM conta como falha e volta para pendente", async () => {
+    const { r, finalizadas } = repo({ lerConfig: async () => crmCfg });
+    const fetchImpl = vi.fn<FetchLike>().mockResolvedValue(
+      new Response(JSON.stringify({ jsonrpc: "2.0", id: 1, result: { content: [{ type: "text", text: "Sem conexão" }], isError: true } }))
+    );
+    await despacharPendentes(r, { appUrl: "https://flow", fetchImpl, agora });
+    expect(finalizadas[0][1]).toEqual({ status: "pendente", http_status: 200, erro: "Sem conexão", enviado_em: null });
+  });
+
+  it("canal webhook leva evento e mensagem no JSON", async () => {
+    const { r } = repo({
+      reservarPendentes: async () => [{ ...entrega(), evento: "tarefa.prazo", payload_extra: null }]
+    });
+    const fetchImpl = responde(200);
+    await despacharPendentes(r, { appUrl: "https://flow", fetchImpl, agora });
+    const body = JSON.parse(fetchImpl.mock.calls[0][1].body as string);
+    expect(body.evento).toBe("tarefa.prazo");
+    expect(body.mensagem).toContain("Criativos");
+  });
+
+  it("canal CRM sem chave não reserva nada", async () => {
+    const { r } = repo({ lerConfig: async () => ({ ...crmCfg, crm_chave: null }) });
+    await despacharPendentes(r, { appUrl: "https://flow", fetchImpl: rpcOk(), agora });
+    expect(r.reservarPendentes).not.toHaveBeenCalled();
+  });
+});
+
+it("prazo/atraso de tarefa concluída antes do envio vira cancelado, sem envio", async () => {
+  const { r, finalizadas } = repo({
+    reservarPendentes: async () => [{ ...entrega(), evento: "tarefa.prazo", payload_extra: null }],
+    carregarDados: async () => "cancelada"
+  });
+  const fetchImpl = responde(200);
+  await despacharPendentes(r, { appUrl: "https://flow", fetchImpl, agora });
+  expect(fetchImpl).not.toHaveBeenCalled();
+  expect(finalizadas[0][1]).toEqual({
+    status: "cancelado", http_status: null, erro: "A tarefa foi concluída antes do envio.", enviado_em: null
+  });
+});
